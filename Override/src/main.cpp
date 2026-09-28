@@ -59,9 +59,11 @@ void controlDrivetrain() {
 
 void controlIntake() {
     if (master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_R1)) {
-        intake.move_velocity(500); 
+        intake.move(127); 
     } else if (master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_R2)) {
-        intake.move_velocity(-500); 
+        intake.move(-127); 
+    } else if  (master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_X)) {
+        intake.brake();
     }
 }
 
@@ -92,9 +94,9 @@ void controlCascadeSpool() {
 
 void controlClampWrist() {
     if (master.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) {
-        clamp_wrist.move_velocity(70); 
+        clamp_wrist.move_velocity(100); 
     } else if (master.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
-        clamp_wrist.move_velocity(-70); 
+        clamp_wrist.move_velocity(-100); 
     } else {
         clamp_wrist.brake();
     }
