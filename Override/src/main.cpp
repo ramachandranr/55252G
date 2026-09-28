@@ -142,11 +142,11 @@ void calibrateChassis() {
 }   
 
 void initSubsystems() {
-    left_motors.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
-    right_motors.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+    left_motors.set_brake_mode_all(pros::E_MOTOR_BRAKE_COAST);
+    right_motors.set_brake_mode_all(pros::E_MOTOR_BRAKE_COAST);
     clamp_rollers.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
     clamp_wrist.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-    cascade.set_brake_mode(pros::E_MOTOR_BRAKE_BRAKE);
+    cascade.set_brake_mode_all(pros::E_MOTOR_BRAKE_BRAKE);
     
     cascade.tare_position_all();
 }
