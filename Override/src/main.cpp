@@ -32,6 +32,12 @@ lemlib::ControllerSettings angularController(2, 0, 10, 3, 1, 100, 3, 500, 0);
 lemlib::OdomSensors sensors(nullptr, nullptr, nullptr, nullptr, &imu);
 lemlib::Chassis chassis(drivetrain, linearController, angularController, sensors);
 
+bool isArcadeMode = true;
+
+void toggleDriveMode() {
+    isArcadeMode = !isArcadeMode;
+}
+
 // ==========================================
 // Diagnostics Task
 // ==========================================
@@ -146,13 +152,15 @@ void initSubsystems() {
     right_motors.set_brake_mode_all(pros::E_MOTOR_BRAKE_COAST);
     clamp_rollers.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
     clamp_wrist.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-    cascade.set_brake_mode_all(pros::E_MOTOR_BRAKE_BRAKE);
+    cascade.set_brake_mode_all(pros::E_MOTOR_BRAKE_HOLD);
     
     cascade.tare_position_all();
 }
 
 void initialize() {
     pros::lcd::initialize();
+    pros::lcd::register_btn0_cb(toggleDriveMode);
+    pros::lcd::set_text(7, "[Toggle Drive]");
     calibrateChassis(); 
     
     startDiagnosticTask(); // Launch the background diagnostics
@@ -161,14 +169,15 @@ void initialize() {
     pros::Task screenTask([&]() {
         while (true) {
             // All odometry and cascade data condensed onto Line 0
-            pros::lcd::print(0, "X:%.1f Y:%.1f T:%.1f C:%.0f", 
+            pros::lcd::print(0, "[%s] X:%.1f Y:%.1f T:%.1f C:%.0f", 
+                             isArcadeMode ? "ARC" : "TNK",
                              chassis.getPose().x, 
                              chassis.getPose().y, 
                              chassis.getPose().theta, 
                              cascade.get_position()); 
             
             // delay to save resources
-            pros::delay(100);
+            pros::delay(200);
         }
     });
 }
@@ -186,9 +195,18 @@ void autonomous() {
 // ==========================================
 
 void controlDrivetrain() {
-    int leftY = master.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y);
-    int rightX = master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X);
-    chassis.arcade(leftY, rightX);
+
+    if (isArcadeMode) {
+        // ARCADE
+        int leftY = master.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y);
+        int rightX = master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X);
+        chassis.arcade(leftY, rightX);
+    } else {
+        // TANK
+        int leftY = master.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y);
+        int rightY = master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_Y);
+        chassis.tank(leftY, rightY);
+    }
 }
 
 void controlIntake() {
@@ -202,20 +220,25 @@ void controlIntake() {
 }
 
 void controlCascadeSpool() {
-
+    double position_deg = cascade.get_position();
+    double TOP_LIMIT = -2800.0;
     if (master.get_digital(pros::E_CONTROLLER_DIGITAL_DOWN)) {
           if (bumper.get_value() == 1) {
             cascade.brake(); 
+            cascade.tare_position_all(); // Prevents encoder drift
           } else {
             cascade.move(127); 
+        }       
+    } else if (master.get_digital(pros::E_CONTROLLER_DIGITAL_UP)) {
+        if (position_deg <= TOP_LIMIT) {
+            cascade.brake(); 
+        }else{ 
+            cascade.move(-127); 
         }
         
-    } else if (master.get_digital(pros::E_CONTROLLER_DIGITAL_UP)) {
-        cascade.move(-127); 
-
-    } else {
-        cascade.brake(); 
-    }
+    }else{
+        cascade.brake();
+    } 
 }
 
 void controlClampWrist() {
