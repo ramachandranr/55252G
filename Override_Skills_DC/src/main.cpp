@@ -37,8 +37,8 @@ void calibrateChassis() {
 }
 
 void initSubsystems() {
-    left_motors.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
-    right_motors.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+    left_motors.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+    right_motors.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
     clamp_rollers.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
     clamp_wrist.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
     cascade.set_brake_mode(pros::E_MOTOR_BRAKE_BRAKE);
@@ -84,13 +84,13 @@ void skill2() {
     clamp_wrist.move_absolute(1460, 100);
 }
 void skill3() {
-    clamp_wrist.move_absolute(1460, 100);
-    cascade.move_absolute(0, 100);
-    intake.move(0);
-    clamp_rollers.move(0);
+    clamp_wrist.move_absolute(1200, 100);
     clamp_rollers.move(100);
 }
-void skill4() {}
+
+void skill4() {
+    clamp_wrist.move_absolute(700,-100);
+}
 void skill5() {}
 void skill6() {}
 void skill7() {}
