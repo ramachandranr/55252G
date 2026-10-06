@@ -68,7 +68,6 @@ void controlDrivetrain() {
 
 void skill1() {
     clamp_wrist.move_absolute(1100, 100);
-    cascade.move_absolute(0, 100);
     intake.move(0);
     clamp_rollers.move(0);
 
@@ -76,7 +75,6 @@ void skill1() {
 }
 void skill2() {
     clamp_wrist.move_absolute(1100, 100);
-    cascade.move_absolute(0, 100);
     intake.move(0);
     clamp_rollers.move(0);
     clamp_rollers.move(-100);
@@ -84,18 +82,44 @@ void skill2() {
     clamp_wrist.move_absolute(1460, 100);
 }
 void skill3() {
-    clamp_wrist.move_absolute(1200, 100);
+    clamp_wrist.move_absolute(400, -100);
     clamp_rollers.move(100);
 }
 
 void skill4() {
-    clamp_wrist.move_absolute(700,-100);
+    clamp_wrist.move_absolute(1100,100);
+    clamp_rollers.move(100);
+    cascade.move_absolute(-750, 100);
 }
-void skill5() {}
-void skill6() {}
-void skill7() {}
-void skill8() {}
-void skill9() {}
+void skill5() {
+    cascade.move_absolute(-650, 100);
+    pros::delay(500);
+    clamp_rollers.move(-100);
+    pros::delay(500);
+    clamp_wrist.move_absolute(1400, 100);
+}
+
+void skill6() {
+    clamp_wrist.move_absolute(1100,100);
+    pros::delay(500);
+    clamp_rollers.move(100);
+    cascade.move_absolute(0, -100);
+    pros::delay(1500);
+    clamp_wrist.move_absolute(400, 100);
+}
+void skill7() {
+    clamp_wrist.move_absolute(1100, 100);
+    pros::delay(500);
+    cascade.move_absolute(-1720, 100);
+}
+void skill8() {
+    clamp_rollers.move(-50);
+    pros::delay(1000);
+    clamp_wrist.move_absolute(1400, 100);
+}
+void skill9() {
+    cascade.move_absolute(0, -100);
+}
 void skill10() {}
 void skill11() {}
 void skill12() {}
