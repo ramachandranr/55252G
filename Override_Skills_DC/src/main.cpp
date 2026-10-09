@@ -24,7 +24,7 @@ pros::Imu imu(13);
 
 lemlib::Drivetrain drivetrain(&left_motors, &right_motors, 11.6, lemlib::Omniwheel::NEW_275, 428, 2);
 lemlib::ControllerSettings linearController(10, 0, 3, 3, 1, 100, 3, 500, 20);
-lemlib::ControllerSettings angularController(2, 0, 10, 3, 1, 100, 3, 500, 0);
+lemlib::ControllerSettings angularController(2.3, 0, 19, 3, 1, 100, 3, 500, 0);
 lemlib::OdomSensors sensors(nullptr, nullptr, nullptr, nullptr, &imu);
 lemlib::Chassis chassis(drivetrain, linearController, angularController, sensors);
 
@@ -176,7 +176,69 @@ void disabled() {}
 
 void competition_initialize() {}
 
-void autonomous() {}
+void autonomous() {
+    chassis.setPose(0, 0, 0);
+    chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
+    clamp_wrist.set_brake_mode(pros::E_MOTOR_BRAKE_BRAKE);
+    clamp_rollers.move(100);
+    chassis.moveToPoint(0, -7, 1000000, {.forwards = false, .maxSpeed = 90, .minSpeed = 80});
+    pros::delay(500);
+    chassis.moveToPoint(0, 0, 1000000, {.forwards = true, .maxSpeed = 127, .minSpeed = 80});
+    chassis.moveToPoint(0, -7, 1000000, {.forwards = false, .maxSpeed = 90, .minSpeed = 80});
+    pros::delay(500);
+    chassis.moveToPoint(0, 0, 1000000, {.forwards = true, .maxSpeed = 127, .minSpeed = 80});
+    pros::delay(700);
+    chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
+    chassis.moveToPoint(0, -9, 1000000, {.forwards = false, .maxSpeed = 80, .minSpeed = 70});
+    pros::delay(1000);
+    clamp_wrist.move_absolute(1100, 95);
+    clamp_rollers.move(0);
+    pros::delay(700);
+    chassis.moveToPoint(-13.802, -16.080, 1000000, {.forwards = false, .maxSpeed = 70, .minSpeed = 60});
+    chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
+    pros::delay(700);
+    chassis.cancelAllMotions();                  // make sure no async motion is fighting it
+    chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
+    chassis.tank(-60, -60, true);                  // push forward; true = skip the drive curve
+    pros::delay(500);
+    clamp_wrist.move_absolute(1100, 95);
+    pros::delay(400);
+    clamp_rollers.move(-50);
+    pros::delay(800);
+    chassis.tank(0, 0, true);  
+    pros::delay(700);
+    clamp_rollers.move(0);
+    chassis.moveToPoint(0, -9, 1000000, {.maxSpeed = 90, .minSpeed = 80});
+    pros::delay(600);
+    clamp_wrist.move_relative(500, 100);
+    chassis.moveToPoint(-22.048, -33.744, 3000, {.forwards = false, .maxSpeed = 127, .earlyExitRange = 1.25}, true);
+    chassis.waitUntil(30);       // after 30" traveled
+    chassis.cancelMotion();
+    chassis.moveToPoint(-22.048, -33.744, 2000, {.forwards = false, .maxSpeed = 50, .earlyExitRange = 1.25});
+    pros::delay(800);
+    clamp_rollers.move(100);
+    pros::delay(800);
+    clamp_wrist.move_absolute(725, 100);
+    pros::delay(800);
+    clamp_wrist.move_absolute(1100, 95);
+    cascade.move_relative(1500, -127);
+    clamp_rollers.move(0);
+    pros::delay(600);
+    chassis.turnToHeading(144.5, 1000000, {.maxSpeed = 90, .minSpeed = 85});
+    // chassis.moveToPoint(-24, -24  1000000, {.forwards = false, .maxSpeed = 80, .minSpeed = 70, .earlyExitRange = 4});
+    chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
+    pros::delay(700);
+    chassis.cancelAllMotions();                  // make sure no async motion is fighting it
+    chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
+    chassis.tank(-60, -60, true);   
+    cascade.move_relative(-400, 100);
+    pros::delay(850);
+    clamp_rollers.move(-100);
+    pros::delay(500);
+    clamp_wrist.move_relative(300, 100);
+    pros::delay(500);
+    chassis.tank(0, 0, true);
+}
 
 void opcontrol() {
     // Separate task so tank drive keeps running even if a skill function blocks.
