@@ -14,22 +14,24 @@ pros::MotorGroup left_motors({-19, -20}, pros::MotorGearset::blue);
 pros::MotorGroup right_motors({11, 12}, pros::MotorGearset::blue);
 
 pros::Motor intake(1, pros::MotorGearset::blue);
-pros::MotorGroup cascade({-3, 9}, pros::MotorGearset::blue); 
+pros::MotorGroup cascade({3, -9}, pros::MotorGearset::blue); 
 pros::Motor clamp_rollers(2, pros::MotorGearset::green); 
 pros::Motor clamp_wrist(10, pros::MotorGearset::green); 
 
 // Initialize bumper switch on ADI port 'A'
 pros::adi::DigitalIn bumper('A');
 pros::Imu imu(13);
+pros::Rotation horizontal(8); // true = reversed
+lemlib::TrackingWheel horizontal_sensor(&horizontal, 1.0, false); // port, diameter in inches, reversed
 
 // ==========================================
 // LemLib Configuration
 // ==========================================
 
-lemlib::Drivetrain drivetrain(&left_motors, &right_motors, 11.6, lemlib::Omniwheel::NEW_4, 428, 2);
+lemlib::Drivetrain drivetrain(&left_motors, &right_motors, 11.6, lemlib::Omniwheel::NEW_275, 428, 2);
 lemlib::ControllerSettings linearController(10, 0, 3, 3, 1, 100, 3, 500, 20);
-lemlib::ControllerSettings angularController(2, 0, 10, 3, 1, 100, 3, 500, 0);
-lemlib::OdomSensors sensors(nullptr, nullptr, nullptr, nullptr, &imu);
+lemlib::ControllerSettings angularController(2.3, 0, 19, 3, 1, 100, 3, 500, 0);
+lemlib::OdomSensors sensors(nullptr, nullptr, &horizontal_sensor, nullptr, &imu);
 lemlib::Chassis chassis(drivetrain, linearController, angularController, sensors);
 
 bool isArcadeMode = true;
@@ -192,6 +194,7 @@ void autonomous() {
     clamp_wrist.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
     //Start clamp rollers to suck the pin in
     clamp_rollers.move(100);
+    clamp_wrist.tare_position();
 
     //Toggler routine
     chassis.moveToPoint(0, -3, 1000000, {.forwards = false, .maxSpeed = 90, .minSpeed = 80});
@@ -207,13 +210,13 @@ void autonomous() {
     chassis.moveToPoint(0, -9, 1000000, {.forwards = false, .maxSpeed = 80, .minSpeed = 70});
     pros::delay(500);
     clamp_rollers.move(0);
-    clamp_wrist.move_absolute(1100, 100);
+    clamp_wrist.move_absolute(1050, 100);
     pros::delay(500);
-    chassis.moveToPose(-13.802, -16.080,65, 1000000, {.forwards = false, .maxSpeed = 70, .minSpeed = 60});
+    chassis.moveToPose(-13.802, -16.080,70, 1000000, {.forwards = false, .maxSpeed = 70, .minSpeed = 60});
     pros::delay(500);
     chassis.cancelAllMotions();                  // make sure no async motion is fighting it
     chassis.tank(-60, -60, true);                  // push forward; true = skip the drive curve
-    clamp_wrist.move_absolute(1100, 100);
+    clamp_wrist.move_absolute(1300, 100);
     pros::delay(500);
     clamp_rollers.move(-50);
     pros::delay(500);
@@ -229,7 +232,7 @@ void autonomous() {
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
     chassis.moveToPose(-24.248, -34.744,40, 3000, {.forwards = false, .maxSpeed = 90,.minSpeed = 40, .earlyExitRange = 5}, true);
 
-    //Collect pin + cup
+   //Collect pin + cup
     pros::delay(1000);
     clamp_rollers.move(100);
     pros::delay(500);
@@ -299,13 +302,13 @@ void controlCascadeSpool() {
             cascade.brake(); 
             cascade.tare_position_all(); // Prevents encoder drift
           } else {
-            cascade.move(127); 
+            cascade.move(-127); 
         }       
     } else if (master.get_digital(pros::E_CONTROLLER_DIGITAL_UP)) {
         if (position_deg <= TOP_LIMIT) {
             cascade.brake(); 
         }else{ 
-            cascade.move(-127); 
+            cascade.move(127); 
         }
         
     }else{
