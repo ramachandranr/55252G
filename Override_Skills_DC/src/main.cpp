@@ -217,7 +217,7 @@ void autonomous() {
     pros::delay(500);
     clamp_rollers.move(0);
 
-   //Move to collect the first pin+cup
+    //Move to collect the first pin+cup
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_COAST);
     chassis.moveToPoint(-7, -7, 1000000, {.maxSpeed = 90, .minSpeed = 80});
     pros::delay(500);
@@ -239,7 +239,7 @@ void autonomous() {
     clamp_rollers.move(0);
     pros::delay(300);
     chassis.turnToHeading(180, 1000000, {.maxSpeed = 100, .minSpeed = 85});
-    chassis.moveToPose(-24.248, -34.744,165,  1000000, {.forwards = false, .maxSpeed = 80, .minSpeed = 70, .earlyExitRange = 4});
+    chassis.moveToPose(-23.248, -30.744,40, 3000, {.forwards = false, .maxSpeed = 90,.minSpeed = 40, .earlyExitRange = 5}, true);
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
     pros::delay(300);
 
@@ -256,6 +256,11 @@ void autonomous() {
     clamp_wrist.move_relative(300, 100);
     pros::delay(500);
     chassis.tank(0, 0, true);
+    pros::delay(600);
+
+    // Park at Center Goal
+    chassis.moveToPoint(0, -72, 100000000, {.maxSpeed = 70, .minSpeed = 60, .earlyExitRange = 5});
+    pros::delay(20);
 }
 
 void opcontrol() {
