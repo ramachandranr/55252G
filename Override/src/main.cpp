@@ -216,7 +216,7 @@ void autonomous() {
     pros::delay(500);
     chassis.cancelAllMotions();                  // make sure no async motion is fighting it
     chassis.tank(-60, -60, true);                  // push forward; true = skip the drive curve
-    clamp_wrist.move_absolute(1300, 100);
+    clamp_wrist.move_absolute(1100, 100);
     pros::delay(500);
     clamp_rollers.move(-50);
     pros::delay(500);
@@ -230,13 +230,14 @@ void autonomous() {
     pros::delay(500);
     clamp_wrist.move_absolute(1500, 100);
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
-    chassis.moveToPose(-24.248, -34.744,40, 3000, {.forwards = false, .maxSpeed = 90,.minSpeed = 40, .earlyExitRange = 5}, true);
+    chassis.moveToPose(-23.248, -30.744,40, 3000, {.forwards = false, .maxSpeed = 90,.minSpeed = 40, .earlyExitRange = 5}, true);
 
    //Collect pin + cup
     pros::delay(1000);
     clamp_rollers.move(100);
     pros::delay(500);
-    clamp_wrist.move_absolute(725, 100);
+    clamp_wrist.move_absolute(680, 100);
+    pros::delay(500);
     chassis.turnToHeading(15,1000);
     
     //collected pin + cup, now turn towards scoring
@@ -253,9 +254,9 @@ void autonomous() {
     //Score Pin + Cup
     chassis.cancelAllMotions();                  // make sure no async motion is fighting it
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
-    chassis.tank(-60, -60, true);   
+    chassis.tank(-80, -60, true);   
     cascade.move_relative(-600, 100);
-    pros::delay(800);
+    pros::delay(1200);
     clamp_rollers.move(-50);
     pros::delay(500);
     cascade.move_relative(300, 100);
