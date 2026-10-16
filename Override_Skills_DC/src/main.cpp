@@ -70,100 +70,106 @@ void controlDrivetrain() {
 
 void skill1() {
     //Move Wrist into scoring position
-    clamp_wrist.move_absolute(1100, 100);
+    clamp_wrist.move_absolute(1100, 200);
 
 }
 void skill2() {
     //Score Pre Load and then retract the wrist
-    clamp_wrist.move_absolute(1100, 100);
-    clamp_rollers.move(-50);
+    clamp_wrist.move_absolute(1100, 200);
+    clamp_rollers.move(-100);
     pros::delay(500);
-    clamp_wrist.move_absolute(1460, 100);
+    clamp_wrist.move_absolute(1460, 200);
 }
 void skill3() {
     //Lower wrist and run clamp rollers to intake
-    clamp_wrist.move_absolute(400, -100);
+    clamp_wrist.move_absolute(400, -200);
     clamp_rollers.move(100);
 }
 
 void skill4() {
     //Move wrist into scoring position and prepare cascade for scoring
-    clamp_wrist.move_absolute(1100,100);
+    clamp_wrist.move_absolute(1100,200);
     clamp_rollers.move(100);
-    cascade.move_absolute(-750, 100);
+    cascade.move_absolute(-750, 400);
 }
 void skill5() {
     //Prepare cascade for scoring by bringing it down, score  and retract wrist
-    cascade.move_absolute(-600, 100);
+    cascade.move_absolute(-600, 400);
     pros::delay(500);
     clamp_rollers.move(-100);
     pros::delay(500);
-    clamp_wrist.move_absolute(1400, 100);
+    clamp_wrist.move_absolute(1400, 200);
 }
 
 void skill6() {
     //Move wrist into scoring position, run clamp rollers, and bring cascade down. This collects the second pin + cup
-    clamp_wrist.move_absolute(1100,100);
+    clamp_wrist.move_absolute(1100,200);
     pros::delay(500);
     clamp_rollers.move(100);
-    cascade.move_absolute(0, -100);
+    cascade.move_absolute(0, -400);
     pros::delay(1500);
-    clamp_wrist.move_absolute(400, 100);
+    clamp_wrist.move_absolute(400, 200);
 }
 void skill7() {
     //Move wrist into scoring position and bring cascade down
-    clamp_wrist.move_absolute(1100, 100);
+    clamp_wrist.move_absolute(1050, 200);
     pros::delay(500);
-    cascade.move_absolute(-1760, 100);
+    cascade.move_absolute(-1650, 400);
 }
 void skill8() {
     //Score the collected pin + cup
-    cascade.move_absolute(1600,100);
+    cascade.move_absolute(-1450,400);
     clamp_rollers.move(-50);
     pros::delay(1000);
     clamp_rollers.move(0);
-    cascade.move_absolute(-1860,100);
-    clamp_wrist.move_absolute(1400, 100);
+    cascade.move_absolute(-1650,400);
+    clamp_wrist.move_absolute(1650, 400);
 }
 void skill9() {
     //Bring cascade to the starting position and run intake to take the pin
-    cascade.move_absolute(0, -100);
+    cascade.move_absolute(0, -400);
     pros::delay(500);
-    clamp_wrist.move_absolute(-1400, 100);
-    clamp_rollers.move(100);
+    clamp_wrist.move_absolute(-1400, 200);
+    clamp_rollers.move(127);
     intake.move(127);
 }
 
 void skill10() {
-    // Score the collected Pin to center goal
+    // Bring Cascade up to score the pin
     intake.move(0);
-    clamp_wrist.move_absolute(1100, 100);
-    cascade.move_absolute(-550,100);
+    clamp_wrist.move_absolute(1100, 200);
+    clamp_rollers.move(100);
+    cascade.move_absolute(-550,400);
 }
 
 void skill11() {
+    //score the pin
     clamp_rollers.move(-50);
+    cascade.move_absolute(-750,400);
 }
 void skill12() {
-    clamp_rollers.move(0);
-    cascade.move_absolute(0, -100);
-    clamp_rollers.move(100);
+    //Bring cascade to the starting position and run intake to take the pin
+    cascade.move_absolute(0, -400);
     pros::delay(500);
-    clamp_wrist.move_absolute(400, -100);
+    clamp_wrist.move_absolute(-1400, 200);
+    clamp_rollers.move(100);
+    intake.move(200);
 }
 
 void skill13() {
-    cascade.move_absolute(-1350, 100);
-    clamp_wrist.move_absolute(1100, 100);
+    //Prepare cascade and wrist to score the pin + cup
+    clamp_wrist.move_absolute(1100, 200);
+   cascade.move_absolute(-1450,400);
+   clamp_rollers.move(100);
 }
 
 void skill14() {
+    //score the pin and cup
     clamp_rollers.move(-50);
 }
 
 void skill15() {
-    clamp_rollers.move(0);
-    cascade.move_absolute(0, 100);
+    
 }
 
 void skill16() {}
