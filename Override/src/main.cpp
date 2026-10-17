@@ -191,7 +191,7 @@ void competition_initialize() {}
 void autonomous() {
     chassis.setPose(0, 0, 0);
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_COAST);
-    clamp_wrist.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+    clamp_wrist.set_brake_mode(pros::E_MOTOR_BRAKE_BRAKE);
     //Start clamp rollers to suck the pin in
     clamp_rollers.move(100);
     clamp_wrist.tare_position();
@@ -262,9 +262,12 @@ void autonomous() {
     //Score Pin + Cup
     chassis.waitUntilDone();                  // make sure no async motion is fighting it
     //chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
-    chassis.tank(-70, -60, true);   
+    chassis.tank(-29, -29, true); // made the tank to -40, -40 to stop the bot from bouncing off the goal.
+    clamp_wrist.move_absolute(1100, 95);
+
+    pros::delay(300); 
     cascade.move_absolute(600, -300);
-    //pros::delay(1200);
+    pros::delay(100);
     clamp_rollers.move(-25);
     pros::delay(200);
     cascade.move_absolute(900, -300);
@@ -272,7 +275,48 @@ void autonomous() {
     clamp_wrist.move_relative(300, 100);
     //pros::delay(500);
     chassis.tank(0, 0, true);
+    pros::delay(500); //comment out later
+
+    //move to collect 2nd pin + cup
+    chassis.moveToPose(-20.4, -39.0, 132.9, 3000, {.forwards = true, .maxSpeed = 100,.minSpeed = 20, .earlyExitRange = 5}, false); // move to Pin + cup
+    cascade.move_absolute(0, 100);
+    clamp_wrist.move_absolute(1500, 100);
+    pros::delay(500); //comment out later
+    chassis.moveToPose(-44, -20, 130, 3000, {.forwards = false, .maxSpeed = 65,.minSpeed = 0, .earlyExitRange = 15}); // move to Pin + cup
+    chassis.waitUntilDone();
+    clamp_rollers.move(100);
+    clamp_wrist.move_relative(-1400, 100); //Move the wrist down to collect pin + cup
+    pros::delay(700);
+    clamp_wrist.move_relative(150, 100);
+    pros::delay(125);
+    chassis.turnToHeading(140,1000);
+    pros::delay(500);
+    clamp_wrist.move_absolute(1100, 100);
+    chassis.turnToHeading(242, 10000);
+    chassis.waitUntilDone();
+    cascade.move_absolute(2000, 300);
+    pros::delay(1000);
+    chassis.tank(-60, -60, true);
+    cascade.move_absolute(1700, 300);
+    clamp_wrist.move_absolute(1100, 100);
+    pros::delay(800);
+    clamp_rollers.move(-25);
+    pros::delay(200);
+    cascade.move_absolute(2000, -300);
+    pros::delay(500);
+    clamp_wrist.move_relative(300, 100);
+    //pros::delay(500);
+    chassis.waitUntilDone();
+    chassis.cancelAllMotions();
+    chassis.tank(0, 0, true);
+    pros::delay(300);
+    chassis.moveToPose(-44, -20, 130, 3000, {.forwards = true, .maxSpeed = 65,.minSpeed = 0, .earlyExitRange = 15}); // move to Pin + cup
+    cascade.move_absolute(0, 100);
+    pros::delay(300);
+    chassis.moveToPoint(-3.6, -46.3, 10000, {.forwards = true, .maxSpeed = 90});
 }
+
+
 
 // ==========================================
 // Control Logic Functions
