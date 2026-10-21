@@ -23,8 +23,15 @@ pros::Motor clamp_wrist(10, pros::MotorGearset::green);
 
 pros::adi::DigitalIn bumper('A');
 pros::Imu imu(13);
+// TODO: CHECK the horizontal odometry setup on the robot before trusting any moveToPose.
+//   - wheel diameter: NEW_2 is 2.125" (LemLib's 2" omni); confirm it matches the real wheel
+//   - offset: 0 assumes the wheel is on the line through the robot's centre of rotation; measure it
+//     (front of centre is positive, behind is negative)
+//   - direction: if x reads backwards when the robot is pushed sideways, reverse the sensor above
+//     (pros::Rotation horizontal(8, true))
+// A quick check: push the robot 24" sideways by hand and compare the x reading on the brain screen.
 pros::Rotation horizontal(8);
-lemlib::TrackingWheel horizontal_sensor(&horizontal, 1.0, false);
+lemlib::TrackingWheel horizontal_sensor(&horizontal, lemlib::Omniwheel::NEW_2, 0);   // sensor, wheel diameter, offset from the tracking centre (in)
 
 // ==========================================
 // LemLib Configuration
@@ -233,22 +240,37 @@ void competition_initialize() {}
 //   ->  moveToPinAndCup1  ->  grabPinAndCup1  ->  moveToDropPinAndCup1  ->  dropPinAndCup1
 //   ->  getPinAndCup2  ->  dropPinAndCup2   (the last two are not written yet)
 
-// Zeroes the pose and sets the brake modes before anything moves.
+// Waits until `motor` is within `tolerance` of `target`, or `timeoutMs` passes.
+// move_absolute and move_relative return immediately, and a move_relative issued before the last
+// one finishes starts from wherever the motor currently is. Wait here before the next move.
+void waitForPosition(const pros::AbstractMotor& motor, double target, int timeoutMs, double tolerance = 10) {
+    uint32_t start = pros::millis();
+    while (std::abs(motor.get_position() - target) > tolerance && pros::millis() - start < static_cast<uint32_t>(timeoutMs)) {
+        pros::delay(10);
+    }
+}
+
+// Drives the cascade down onto the bumper and zeroes it there, so the absolute cascade targets below
+// mean the same thing every run. If the bumper is never reached (1.5 s), the cascade is left un-zeroed.
+void zeroCascade() {
+    cascade.set_brake_mode_all(pros::E_MOTOR_BRAKE_HOLD);
+
+    uint32_t start = pros::millis();
+    while (bumper.get_value() != 1 && pros::millis() - start < 1500) {
+        cascade.move(-127);
+        pros::delay(10);
+    }
+    cascade.brake();
+    if (bumper.get_value() == 1) cascade.tare_position_all();
+}
+
+// Zeroes the pose, the cascade and the wrist, and sets the brake modes before anything moves.
 void setupAutonomous() {
     chassis.setPose(0, 0, 0);
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_COAST);   // coast while the quick moves in runToggler start
     clamp_wrist.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
     clamp_wrist.tare_position();                       // wrist positions below count from here
-}
-
-// Waits until the cascade is within `tolerance` of `target`, or `timeoutMs` passes.
-// move_absolute and move_relative return immediately, and a move_relative issued before the last
-// one finishes starts from wherever the cascade currently is. Use this before the next cascade move.
-void waitForCascade(double target, int timeoutMs, double tolerance = 10) {
-    uint32_t start = pros::millis();
-    while (std::abs(cascade.get_position() - target) > tolerance && pros::millis() - start < static_cast<uint32_t>(timeoutMs)) {
-        pros::delay(10);
-    }
+    zeroCascade();                                     // cascade positions below count from the bumper
 }
 
 // Runs the clamp rollers and moves back and forth twice (0 to -3 inches and back) at high speed.
@@ -265,27 +287,30 @@ void runToggler() {
 }
 
 // Backs up to (0, -9), then drives backwards to (-21, -16) facing 70 degrees, and waits there.
-// The rollers stop and the wrist moves to 1050 while it is still backing up.
+// The rollers stop and the wrist moves to 1100 (horizontal) while it is still backing up.
 void moveToDropPin() {
     chassis.moveToPoint(0, -9, 1500, {.forwards = false, .maxSpeed = 70, .minSpeed = 60});
     clamp_rollers.move(0);
-    clamp_wrist.move_absolute(1050, 100);
+    clamp_wrist.move_absolute(1100, 100);
 
     chassis.moveToPose(-21, -16, 70, 10000, {.forwards = false, .maxSpeed = 70, .minSpeed = 60});
     chassis.waitUntilDone();
 }
 
-// At the drop point: moves the wrist to 1150 and runs the rollers in reverse (-50) for 0.5 s.
+// At the drop point: keeps driving backwards at -60 (power, no drive curve) for 0.2 s, then runs the rollers
+// in reverse (-50) for another 0.2 s while still driving. Then stops the drive and the rollers.
 void dropPin() {
-    clamp_wrist.move_absolute(1150, 100);
+    chassis.tank(-60, -60, true);
+    pros::delay(200);
+    clamp_wrist.move_absolute(1100, 100);
     clamp_rollers.move(-50);
-
-    pros::delay(500);
+    pros::delay(200);
+    chassis.tank(0, 0, true);
     clamp_rollers.move(0);
 }
 
 // Drives forward to (-5, -7) facing 90 degrees, moves the wrist to 1500, then drives backwards
-// to (-22.3, -29.5) facing 32 degrees. Blocks until the robot is within 5 inches of that point
+// to (-22.3, -29.5) facing 38 degrees. Blocks until the robot is within 5 inches of that point
 // (earlyExitRange) or 3 s pass.
 void moveToPinAndCup1() {
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
@@ -293,47 +318,48 @@ void moveToPinAndCup1() {
 
     clamp_wrist.move_absolute(1500, 100);
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
-    chassis.moveToPose(-22.3, -29.5, 32, 3000, {.forwards = false, .maxSpeed = 90, .minSpeed = 0, .earlyExitRange = 5}, false);
+    chassis.moveToPose(-22.3, -29.5, 38, 3000, {.forwards = false, .maxSpeed = 90, .minSpeed = 0, .earlyExitRange = 5}, false);
 }
 
-// Runs the rollers forward (100) for 0.5 s, then moves the wrist to 280 and waits 0.5 s.
+// Collects the pin and cup. Runs the rollers forward (100) and lowers the wrist 1400 below where it is,
+// waiting until it gets there (3 s cap), then raises it 150. Both moves use absolute targets: a second
+// move_relative issued early would start from wherever the wrist had reached. Then turns to 15 degrees,
+// waits 0.5 s, and moves the wrist to 1100 to hold the pin and cup.
 void grabPinAndCup1() {
     clamp_rollers.move(100);
+    double wristDown = clamp_wrist.get_position() - 1400;
+    clamp_wrist.move_absolute(wristDown, 100);
+    waitForPosition(clamp_wrist, wristDown, 3000);
+    clamp_wrist.move_absolute(wristDown + 150, 100);
+    pros::delay(125);
+    chassis.turnToHeading(15, 1000);
     pros::delay(500);
-    clamp_wrist.move_absolute(280, 100);
-    pros::delay(500);
+    clamp_wrist.move_absolute(1100, 100);
 }
 
-// Turns to 15 degrees, moves the wrist to 900, and raises the cascade by 1300 (to an absolute target,
-// so the later drop can rely on it). Then turns to 160 degrees, backs up to (-23.4, -20), and waits
-// for both the drive and the cascade to finish before returning.
+// Turns toward the scoring spot: wrist to 1100, cascade to 900 (absolute, speed 300), then turns to 160
+// degrees and backs up to (-23.4, -20). Waits for the drive to finish before returning.
 // The 160 degree turn is capped at 2 s so a turn that never settles can't stall autonomous.
 void moveToDropPinAndCup1() {
-    chassis.turnToHeading(15, 1000);
-
-    clamp_wrist.move_absolute(900, 95);
-    double cascadeRaised = cascade.get_position() + 1300;
-    cascade.move_absolute(cascadeRaised, 127);
+    clamp_wrist.move_absolute(1100, 95);
+    cascade.move_absolute(900, 300);
     pros::delay(300);
     chassis.turnToHeading(160, 2000, {.maxSpeed = 80, .minSpeed = 25});
     chassis.moveToPoint(-23.4, -20, 2000, {.forwards = false, .maxSpeed = 80, .minSpeed = 70, .earlyExitRange = 4});
     chassis.waitUntilDone();                           // dropPinAndCup1 must not start while still driving
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
-    waitForCascade(cascadeRaised, 1500);
 }
 
-// Lowers the cascade by 500 while running the rollers in reverse (-25), waits for it to get there,
-// then raises it by 300 and moves the wrist by +300. Stops the drivetrain.
-// The cascade targets are absolute: a second move_relative issued before the first finished would
-// start from wherever the cascade had reached, not from the bottom.
+// Scores the pin and cup. Drives backwards at -70 / -60 while the cascade goes to 600 (absolute) and the
+// rollers run in reverse (-25); 0.2 s later the cascade returns to 900, and 0.5 s after that the wrist
+// moves by +300. Then stops the drive.
 void dropPinAndCup1() {
-    double cascadeStart = cascade.get_position();
-    double cascadeLowered = cascadeStart - 500;
-
-    cascade.move_absolute(cascadeLowered, 100);
+    chassis.tank(-70, -60, true);
+    cascade.move_absolute(600, 300);
     clamp_rollers.move(-25);
-    waitForCascade(cascadeLowered, 1500);
-    cascade.move_absolute(cascadeLowered + 300, 100);
+    pros::delay(200);
+    cascade.move_absolute(900, 300);
+    pros::delay(500);
     clamp_wrist.move_relative(300, 100);
     chassis.tank(0, 0, true);
 }
@@ -381,18 +407,19 @@ void controlIntake() {
 
 void controlCascadeSpool() {
     double position_deg = cascade.get_position();
-    double TOP_LIMIT = -2800.0;
+    // Up is positive: Down drives into the bumper, which is zero. A negative limit could never be reached.
+    double TOP_LIMIT = 2800.0;
     if (master.get_digital(pros::E_CONTROLLER_DIGITAL_DOWN)) {
           if (bumper.get_value() == 1) {
-            cascade.brake(); 
-            cascade.tare_position_all(); 
-          } else cascade.move(-127);       
+            cascade.brake();
+            cascade.tare_position_all();
+          } else cascade.move(-127);
     } else if (master.get_digital(pros::E_CONTROLLER_DIGITAL_UP)) {
-        if (position_deg <= TOP_LIMIT) cascade.brake(); 
-        else cascade.move(127); 
+        if (position_deg >= TOP_LIMIT) cascade.brake();
+        else cascade.move(127);
     } else {
         cascade.brake();
-    } 
+    }
 }
 
 void controlClampWrist() {
