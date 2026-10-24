@@ -69,31 +69,31 @@ void controlDrivetrain() {
 // then does the incoming skill's Start task run.
 
 void skill1() {
-    //Move Wrist into scoring position
+    //Move Wrist into scoring position for alliance goal
     clamp_wrist.move_absolute(1100, 200);
 
 }
 void skill2() {
-    //Score Pre Load and then retract the wrist
+    //Score Pre Load and then retract the wrist. This is the first scoring Pin
     clamp_wrist.move_absolute(1100, 200);
     clamp_rollers.move(-100);
     pros::delay(500);
     clamp_wrist.move_absolute(1460, 200);
 }
 void skill3() {
-    //Lower wrist and run clamp rollers to intake
+    //Lower wrist and run clamp rollers to intake. This is for the first pin + cup combo
     clamp_wrist.move_absolute(400, -200);
     clamp_rollers.move(100);
 }
 
 void skill4() {
     //Move wrist into scoring position and prepare cascade for scoring
-    clamp_wrist.move_absolute(1100,200);
+    clamp_wrist.move_absolute(1150,200);
     clamp_rollers.move(100);
     cascade.move_absolute(-750, 400);
 }
 void skill5() {
-    //Prepare cascade for scoring by bringing it down, score  and retract wrist
+    //Prepare cascade for scoring by bringing it down, score the first pin and cup and retract wrist
     cascade.move_absolute(-600, 400);
     pros::delay(500);
     clamp_rollers.move(-100);
@@ -103,21 +103,21 @@ void skill5() {
 
 void skill6() {
     //Move wrist into scoring position, run clamp rollers, and bring cascade down. This collects the second pin + cup
-    clamp_wrist.move_absolute(1100,200);
+    clamp_wrist.move_absolute(1250,200);
     pros::delay(500);
     clamp_rollers.move(100);
     cascade.move_absolute(0, -400);
-    pros::delay(1500);
+    pros::delay(500);
     clamp_wrist.move_absolute(400, 200);
 }
 void skill7() {
     //Move wrist into scoring position and bring cascade down
-    clamp_wrist.move_absolute(1050, 200);
+    clamp_wrist.move_absolute(1250, 200);
     pros::delay(500);
     cascade.move_absolute(-1650, 400);
 }
 void skill8() {
-    //Score the collected pin + cup
+    //Score the second pin + cup
     cascade.move_absolute(-1450,400);
     clamp_rollers.move(-50);
     pros::delay(1000);
@@ -137,44 +137,73 @@ void skill9() {
 void skill10() {
     // Bring Cascade up to score the pin
     intake.move(0);
-    clamp_wrist.move_absolute(1100, 200);
+    clamp_wrist.move_absolute(1250, 200);
     clamp_rollers.move(100);
-    cascade.move_absolute(-550,400);
+    cascade.move_absolute(0,400);
 }
 
 void skill11() {
     //score the pin
     clamp_rollers.move(-50);
-    cascade.move_absolute(-750,400);
+
 }
 void skill12() {
-    //Bring cascade to the starting position and run intake to take the pin
+    //Bring cascade to the starting position and run intake to take the next pin and a cup
     cascade.move_absolute(0, -400);
     pros::delay(500);
-    clamp_wrist.move_absolute(-1400, 200);
+    clamp_wrist.move_absolute(-1300, 200);
     clamp_rollers.move(100);
     intake.move(200);
 }
 
 void skill13() {
-    //Prepare cascade and wrist to score the pin + cup
-    clamp_wrist.move_absolute(1100, 200);
-   cascade.move_absolute(-1450,400);
-   clamp_rollers.move(100);
+    //Move wrist into scoring position and prepare cascade for scoring
+    clamp_wrist.move_absolute(1250,200);
+    clamp_rollers.move(100);
+    cascade.move_absolute(-750, 400);
 }
 
 void skill14() {
-    //score the pin and cup
-    clamp_rollers.move(-50);
+    //Prepare cascade for scoring by bringing it down, score  and retract wrist
+    cascade.move_absolute(-600, 400);
+    pros::delay(500);
+    clamp_rollers.move(-100);
+    pros::delay(500);
+    clamp_wrist.move_absolute(1400, 200);
 }
 
 void skill15() {
-    
+    //Bring cascade to the starting position and run intake to take the pin
+    cascade.move_absolute(0, -400);
+    pros::delay(500);
+    clamp_wrist.move_absolute(-600, 200);
+    clamp_rollers.move(100);
+    intake.move(200);
 }
 
-void skill16() {}
-void skill17() {}
-void skill18() {}
+void skill16() {
+//Move wrist into scoring position and bring cascade down
+    clamp_wrist.move_absolute(1250, 200);
+    pros::delay(500);
+    cascade.move_absolute(-1650, 400);
+}
+void skill17() {
+    //score the pin and cup
+    cascade.move_absolute(-1450,400);
+    clamp_rollers.move(-50);
+    pros::delay(1000);
+    clamp_rollers.move(0);
+    cascade.move_absolute(-1650,400);
+    clamp_wrist.move_absolute(1650, 400);
+}
+void skill18() {
+    //bring everything down. while the toggler happens
+    cascade.move_absolute(0, -400);
+    pros::delay(500);
+    clamp_wrist.move_absolute(-1400, 200);
+    clamp_rollers.move(0);
+    intake.move(0);
+}
 void skill19() {}
 void skill20() {}
 void skill21() {}
@@ -189,28 +218,28 @@ const int NUM_SKILLS = 22;
 
 // Controller line fits ~19 chars, so keep descriptions to about 15.
 Skill skills[NUM_SKILLS] = {
-    {skill1,   "Description"},
-    {skill2,  "Description"},
-    {skill3,  "Description"},
-    {skill4,  "Description"},
-    {skill5,  "Description"},
-    {skill6,  "Description"},
-    {skill7,  "Description"},
-    {skill8,  "Description"},
-    {skill9,  "Description"},
-    {skill10, "Description"},
-    {skill11, "Description"},
-    {skill12, "Description"},
-    {skill13, "Description"},
-    {skill14, "Description"},
-    {skill15, "Description"},
-    {skill16, "Description"},
-    {skill17, "Description"},
-    {skill18, "Description"},
-    {skill19, "Description"},
-    {skill20, "Description"},
-    {skill21, "Description"},
-    {skill22, "Description"},
+    {skill1,   "Skill 1"},
+    {skill2,  "Skill 2"},
+    {skill3,  "Skill 3"},
+    {skill4,  "Skill 4"},
+    {skill5,  "Skill 5"},
+    {skill6,  "Skill 6"},
+    {skill7,  "Skill 7"},
+    {skill8,  "Skill 8"},
+    {skill9,  "Skill 9"},
+    {skill10, "Skill 10"},
+    {skill11, "Skill 11"},
+    {skill12, "Skill 12"},
+    {skill13, "Skill 13"},
+    {skill14, "Skill 14"},
+    {skill15, "Skill 15"},
+    {skill16, "Skill 16"},
+    {skill17, "Skill 17"},
+    {skill18, "Skill 18"},
+    {skill19, "Skill 19"},
+    {skill20, "Skill 20"},
+    {skill21, "Skill 21"},
+    {skill22, "Skill 22"},
 };
 
 int currentSkillIndex = 0;
