@@ -1,8 +1,11 @@
 #include "main.h"
 #include "lemlib/api.hpp"
-#include <vector>
-#include <string>
+#include "pid_tuner.hpp"
 #include <algorithm>
+#include <atomic>
+#include <cmath>
+#include <cstdio>
+#include <mutex>
 
 // ==========================================
 // Hardware Configuration
@@ -10,19 +13,25 @@
 
 pros::Controller master(pros::E_CONTROLLER_MASTER);
 
-pros::MotorGroup left_motors({-19, -20}, pros::MotorGearset::blue); 
+pros::MotorGroup left_motors({-19, -20}, pros::MotorGearset::blue);
 pros::MotorGroup right_motors({11, 12}, pros::MotorGearset::blue);
 
 pros::Motor intake(1, pros::MotorGearset::blue);
-pros::MotorGroup cascade({3, -9}, pros::MotorGearset::blue); 
-pros::Motor clamp_rollers(2, pros::MotorGearset::green); 
-pros::Motor clamp_wrist(10, pros::MotorGearset::green); 
+pros::MotorGroup cascade({3, -9}, pros::MotorGearset::blue);
+pros::Motor clamp_rollers(2, pros::MotorGearset::green);
+pros::Motor clamp_wrist(10, pros::MotorGearset::green);
 
-// Initialize bumper switch on ADI port 'A'
 pros::adi::DigitalIn bumper('A');
 pros::Imu imu(13);
-pros::Rotation horizontal(8); // true = reversed
-lemlib::TrackingWheel horizontal_sensor(&horizontal, 1.0, false); // port, diameter in inches, reversed
+// TODO: CHECK the horizontal odometry setup on the robot before trusting any moveToPose.
+//   - wheel diameter: NEW_2 is 2.125" (LemLib's 2" omni); confirm it matches the real wheel
+//   - offset: 0 assumes the wheel is on the line through the robot's centre of rotation; measure it
+//     (front of centre is positive, behind is negative)
+//   - direction: if x reads backwards when the robot is pushed sideways, reverse the sensor above
+//     (pros::Rotation horizontal(8, true))
+// A quick check: push the robot 24" sideways by hand and compare the x reading on the brain screen.
+pros::Rotation horizontal(8);
+lemlib::TrackingWheel horizontal_sensor(&horizontal, lemlib::Omniwheel::NEW_2, 0);   // sensor, wheel diameter, offset from the tracking centre (in)
 
 // ==========================================
 // LemLib Configuration
@@ -34,111 +43,149 @@ lemlib::ControllerSettings angularController(2.3, 0, 19, 3, 1, 100, 3, 500, 0);
 lemlib::OdomSensors sensors(nullptr, nullptr, &horizontal_sensor, nullptr, &imu);
 lemlib::Chassis chassis(drivetrain, linearController, angularController, sensors);
 
-bool isArcadeMode = true;
+std::atomic<bool> isArcadeMode{true};
+
+// ==========================================
+// PID Tuner Hand-off
+// ==========================================
+//
+// The tuner reports only on the controller. While it runs, nothing else may use the
+// brain LCD or the mechanisms. Rules that keep this crash-free:
+//   - LCD button callbacks only set a flag; they never create tasks or touch hardware.
+//   - The screen task is the only code that draws on the LCD, and it also starts the tuner.
+//   - The tuner task deletes itself instead of returning.
+
+std::atomic<bool> isTuning{false};
+std::atomic<bool> tunerRequested{false};
+
+// How long the final tuner result stays on the controller before driving resumes
+const uint32_t TUNER_RESULT_HOLD_MS = 10000;
 
 void toggleDriveMode() {
     isArcadeMode = !isArcadeMode;
 }
 
-// ==========================================
-// Diagnostics Task
-// ==========================================
+void requestTuner() {
+    tunerRequested = true;
+}
 
-struct MotorData {
-    double temp;
-    int current;
-    int voltage;
+void tuningTaskWrapper(void* param) {
+    runTwiddleTuner();
+    pros::delay(TUNER_RESULT_HOLD_MS);
+    isTuning = false;
+
+    // A task must never fall off the end of its function: delete it explicitly
+    pros::c::task_delete(pros::c::task_get_current());
+}
+
+void startTuner() {
+    if (isTuning.exchange(true)) return;   // already running
+
+    // SAFE TASK SPAWNING: Using the native C API prevents memory aborts
+    auto task = pros::c::task_create(tuningTaskWrapper, nullptr, TASK_PRIORITY_DEFAULT,
+                                             TASK_STACK_DEPTH_DEFAULT, "Tuner Task");
+    if (task == nullptr) isTuning = false;   // could not start: hand the robot back
+}
+
+// ==========================================
+// Motor Diagnostics
+// ==========================================
+//
+// Built entirely in fixed buffers: no std::vector, std::string or std::stable_sort,
+// so the repeating diagnostic task never allocates from the heap.
+
+constexpr int DIAG_LINES = 6;
+constexpr int DIAG_LINE_LEN = 64;
+constexpr double MAX_TEMP_C = 55.0;
+constexpr int MAX_CURRENT_MA = 1200;
+
+struct DiagLine {
     bool has_issue;
+    char text[DIAG_LINE_LEN];
 };
 
-struct GroupStat {
-    std::string name;
-    bool has_issue; // True if ANY motor in this group has an issue
-    std::vector<MotorData> motors;
-};
+// Latest diagnostic text. Written by the diagnostic task, read by the screen task.
+char diag_text[DIAG_LINES][DIAG_LINE_LEN] = {};
+pros::Mutex diag_mutex;
 
-void startDiagnosticTask() {
-    pros::Task diagTask([]() {
-        while (true) {
-            std::vector<GroupStat> stats;
+// Describes every motor in a motor or motor group on one line
+void buildDiagLine(DiagLine& line, const char* name, const pros::AbstractMotor& motor) {
+    char body[DIAG_LINE_LEN] = "";
+    size_t used = 0;
+    line.has_issue = false;
 
-            // Helper to gather stats for a MotorGroup
-            auto checkGroup = [&](pros::MotorGroup& group, const std::string& baseName) {
-                auto temps = group.get_temperature_all();
-                auto currents = group.get_current_draw_all();
-                
-                GroupStat groupStat;
-                groupStat.name = baseName;
-                groupStat.has_issue = false;
+    for (int i = 0; i < motor.size(); i++) {
+        double temp = motor.get_temperature(i);
+        int current = motor.get_current_draw(i);
 
-                for (size_t i = 0; i < temps.size(); i++) {
-                    // Trigger an issue if Temp is 55C+ or Current is high (1200mA+)
-                    bool issue = (temps[i] >= 55.0) || (currents[i] > 1200);
-                    if (issue) groupStat.has_issue = true;
-                    
-                    // Voltage omitted to save screen space on the V5 Brain
-                    groupStat.motors.push_back({temps[i], currents[i], 0, issue}); 
-                }
-                stats.push_back(groupStat);
-            };
+        // A missing or unplugged motor reports PROS_ERR_F / PROS_ERR instead of real values
+        bool disconnected = !std::isfinite(temp) || current == PROS_ERR;
+        if (disconnected || temp >= MAX_TEMP_C || current > MAX_CURRENT_MA) line.has_issue = true;
 
-            // Helper to gather stats for a single Motor (treats it as a group of 1)
-            auto checkMotor = [&](pros::Motor& motor, const std::string& name) {
-                double temp = motor.get_temperature();
-                int current = motor.get_current_draw();
-                
-                bool issue = (temp >= 55.0) || (current > 1200);
-                
-                GroupStat groupStat;
-                groupStat.name = name;
-                groupStat.has_issue = issue;
-                groupStat.motors.push_back({temp, current, 0, issue});
-                
-                stats.push_back(groupStat);
-            };
+        int written = disconnected ? snprintf(body + used, sizeof(body) - used, "| --C  N/C   ")
+                                   : snprintf(body + used, sizeof(body) - used, "| %2.0fC %4dmA ", temp, current);
+        if (written > 0) used = std::min(used + static_cast<size_t>(written), sizeof(body) - 1);
+    }
 
-            // 1. Collect Data
-            checkGroup(left_motors, "L_Drv"); 
-            checkGroup(right_motors, "R_Drv");
-            checkGroup(cascade, "Cascd");
-            checkMotor(intake, "Intak");
-            checkMotor(clamp_rollers, "ClmpR");
-            checkMotor(clamp_wrist, "ClmpW");
+    snprintf(line.text, sizeof(line.text), "%s%-5s%s", line.has_issue ? "[!] " : "[OK] ", name, body);
+}
 
-            // 2. Sort Data (Groups with 'has_issue == true' go to the top)
-            std::stable_sort(stats.begin(), stats.end(), [](const GroupStat& a, const GroupStat& b) {
-                return a.has_issue > b.has_issue; 
-            });
-
-            // 3. Print Data to LCD Lines 1 through 6
-            for (size_t i = 0; i < stats.size(); i++) {
-                const auto& g = stats[i];
-                
-                // Add the warning or OK prefix
-                std::string line = g.has_issue ? "[!] " : "[OK] ";
-                
-                // Add the group name padded to 5 characters
-                char nameBuf[10];
-                snprintf(nameBuf, sizeof(nameBuf), "%-5s", g.name.c_str());
-                line += nameBuf;
-
-                // Loop through every motor in this specific group and append it to the same line
-                for (size_t m_idx = 0; m_idx < g.motors.size(); m_idx++) {
-                    const auto& m = g.motors[m_idx];
-                    char m_buf[25];
-                    // %2.0f rounds temp to a whole number to save space
-                    snprintf(m_buf, sizeof(m_buf), "| %2.0fC %4dmA ", m.temp, m.current);
-                    line += m_buf;
-                }
-                
-                // Print to the physical screen, starting at line 1 (leaves line 0 for odometry)
-                pros::lcd::print(i + 1, "%s", line.c_str());
-            }
-            
-            // Run every 2 seconds
-            pros::delay(2000);
+void diagnosticTaskWrapper(void* param) {
+    while (true) {
+        if (isTuning) {
+            pros::delay(500);
+            continue;
         }
-    });
+
+        DiagLine lines[DIAG_LINES];
+        buildDiagLine(lines[0], "L_Drv", left_motors);
+        buildDiagLine(lines[1], "R_Drv", right_motors);
+        buildDiagLine(lines[2], "Cascd", cascade);
+        buildDiagLine(lines[3], "Intak", intake);
+        buildDiagLine(lines[4], "ClmpR", clamp_rollers);
+        buildDiagLine(lines[5], "ClmpW", clamp_wrist);
+
+        {
+            std::lock_guard<pros::Mutex> lock(diag_mutex);
+            int row = 0;
+            // Lines with a problem go first, otherwise keep the original order
+            for (bool issues : {true, false}) {
+                for (const DiagLine& line : lines) {
+                    if (line.has_issue == issues) snprintf(diag_text[row++], DIAG_LINE_LEN, "%-40s", line.text);
+                }
+            }
+        }
+        pros::delay(2000);
+    }
+}
+
+// ==========================================
+// Screen Task
+// ==========================================
+
+void screenTaskWrapper(void* param) {
+    while (true) {
+        if (tunerRequested.exchange(false)) startTuner();
+
+        // While tuning, the LCD is left untouched (no clear, no print);
+        // everything is reported on the controller instead.
+        if (!isTuning) {
+            lemlib::Pose pose = chassis.getPose();
+            pros::lcd::print(0, "[%s] X:%.1f Y:%.1f T:%.1f",
+                             isArcadeMode ? "ARC" : "TNK", pose.x, pose.y, pose.theta);
+
+            // Copy under the lock, print after releasing it
+            char lines[DIAG_LINES][DIAG_LINE_LEN];
+            {
+                std::lock_guard<pros::Mutex> lock(diag_mutex);
+                std::copy(&diag_text[0][0], &diag_text[0][0] + DIAG_LINES * DIAG_LINE_LEN, &lines[0][0]);
+            }
+            for (int i = 0; i < DIAG_LINES; i++) {
+                pros::lcd::print(i + 1, "%s", lines[i]);
+            }
+        }
+        pros::delay(200);
+    }
 }
 
 // ==========================================
@@ -155,122 +202,185 @@ void initSubsystems() {
     clamp_rollers.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
     clamp_wrist.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
     cascade.set_brake_mode_all(pros::E_MOTOR_BRAKE_HOLD);
-    
     cascade.tare_position_all();
 }
 
 void initialize() {
     pros::lcd::initialize();
-    pros::lcd::register_btn0_cb(toggleDriveMode);
-    pros::lcd::set_text(7, "[Toggle Drive]");
-    calibrateChassis(); 
-    
-    startDiagnosticTask(); // Launch the background diagnostics
+    pros::lcd::set_text(7, "[Drive Mode]               [Tune PID]");
 
-    // Separate task for brain screen Line 0 so it updates faster than 2 seconds
-    pros::Task screenTask([&]() {
-        while (true) {
-            // All odometry and cascade data condensed onto Line 0
-            pros::lcd::print(0, "[%s] X:%.1f Y:%.1f T:%.1f C:%.0f", 
-                             isArcadeMode ? "ARC" : "TNK",
-                             chassis.getPose().x, 
-                             chassis.getPose().y, 
-                             chassis.getPose().theta, 
-                             cascade.get_position()); 
-            
-            // delay to save resources
-            pros::delay(200);
-        }
-    });
+    calibrateChassis();
+
+    // Buttons are only live once calibration is done, so the tuner can't start on an uncalibrated IMU
+    pros::lcd::register_btn0_cb(toggleDriveMode);
+    pros::lcd::register_btn2_cb(requestTuner);
+
+    // SAFE TASK SPAWNING: C API avoids all object-destruction memory aborts
+    pros::c::task_create(diagnosticTaskWrapper, nullptr, TASK_PRIORITY_DEFAULT, TASK_STACK_DEPTH_DEFAULT, "Diag Task");
+    pros::c::task_create(screenTaskWrapper, nullptr, TASK_PRIORITY_DEFAULT, TASK_STACK_DEPTH_DEFAULT, "Screen Task");
 }
 
 void disabled() {}
-
 void competition_initialize() {}
 
-void autonomous() {
+// ==========================================
+// Autonomous
+// ==========================================
+//
+// Coordinates are inches relative to the robot's start (the pose is zeroed at the beginning).
+// Heading 0 faces the start direction (+Y) and increases clockwise. `forwards = false` drives backwards.
+// Wrist positions are degrees from the wrist's tare point (taken at the start of autonomous).
+//
+// LemLib motions run in the background by default (async). A new motion waits for the previous
+// one to finish, while plain motor commands written right after a motion run while it is moving.
+// The order of the statements below is therefore part of the routine; do not reorder them.
+//
+// Routine:
+//   setupAutonomous  ->  runToggler  ->  moveToDropPin  ->  dropPin
+//   ->  moveToPinAndCup1  ->  grabPinAndCup1  ->  moveToDropPinAndCup1  ->  dropPinAndCup1
+//   ->  getPinAndCup2  ->  dropPinAndCup2   (the last two are not written yet)
+
+// Waits until `motor` is within `tolerance` of `target`, or `timeoutMs` passes.
+// move_absolute and move_relative return immediately, and a move_relative issued before the last
+// one finishes starts from wherever the motor currently is. Wait here before the next move.
+void waitForPosition(const pros::AbstractMotor& motor, double target, int timeoutMs, double tolerance = 10) {
+    uint32_t start = pros::millis();
+    while (std::abs(motor.get_position() - target) > tolerance && pros::millis() - start < static_cast<uint32_t>(timeoutMs)) {
+        pros::delay(10);
+    }
+}
+
+// Drives the cascade down onto the bumper and zeroes it there, so the absolute cascade targets below
+// mean the same thing every run. If the bumper is never reached (1.5 s), the cascade is left un-zeroed.
+void zeroCascade() {
+    cascade.set_brake_mode_all(pros::E_MOTOR_BRAKE_HOLD);
+
+    uint32_t start = pros::millis();
+    while (bumper.get_value() != 1 && pros::millis() - start < 1500) {
+        cascade.move(-127);
+        pros::delay(10);
+    }
+    cascade.brake();
+    if (bumper.get_value() == 1) cascade.tare_position_all();
+}
+
+// Zeroes the pose, the cascade and the wrist, and sets the brake modes before anything moves.
+void setupAutonomous() {
     chassis.setPose(0, 0, 0);
-    chassis.setBrakeMode(pros::E_MOTOR_BRAKE_COAST);
+    chassis.setBrakeMode(pros::E_MOTOR_BRAKE_COAST);   // coast while the quick moves in runToggler start
     clamp_wrist.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-    //Start clamp rollers to suck the pin in
-    clamp_rollers.move(100);
-    clamp_wrist.tare_position();
+    clamp_wrist.tare_position();                       // wrist positions below count from here
+    zeroCascade();                                     // cascade positions below count from the bumper
+}
 
-    //Toggler routine
+// Runs the clamp rollers and moves back and forth twice (0 to -3 inches and back) at high speed.
+// The rollers are left running; moveToDropPin turns them off.
+void runToggler() {
+    clamp_rollers.move(100);
+
     chassis.moveToPoint(0, -3, 1500, {.forwards = false, .maxSpeed = 100, .minSpeed = 80});
-    //pros::delay(300);
     chassis.moveToPoint(0, 0, 1500, {.forwards = true, .maxSpeed = 100, .minSpeed = 80});
     chassis.moveToPoint(0, -3, 1500, {.forwards = false, .maxSpeed = 100, .minSpeed = 80});
-    //pros::delay(300);
     chassis.moveToPoint(0, 0, 1500, {.forwards = true, .maxSpeed = 100, .minSpeed = 80});
-    //pros::delay(300);
-    chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
-    
-    //Move to score the preload
+    chassis.waitUntilDone();                           // the last move is async: switch the brake after it ends
+    chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);    // hold the wheels for the precise moves that follow
+}
+
+// Backs up to (0, -9), then drives backwards to (-21, -16) facing 70 degrees, and waits there.
+// The rollers stop and the wrist moves to 1100 (horizontal) while it is still backing up.
+void moveToDropPin() {
     chassis.moveToPoint(0, -9, 1500, {.forwards = false, .maxSpeed = 70, .minSpeed = 60});
-    //pros::delay(500);
     clamp_rollers.move(0);
-    clamp_wrist.move_absolute(1050, 100); //Make wrist horizontal
+    clamp_wrist.move_absolute(1100, 100);
 
-
-    //pros::delay(500);
-    chassis.moveToPose(-21, -16,70, 10000, {.forwards = false, .maxSpeed = 70, .minSpeed = 60});//Move to align with the alliance goal
-   // pros::delay(500);
+    chassis.moveToPose(-21, -16, 70, 10000, {.forwards = false, .maxSpeed = 70, .minSpeed = 60});
     chassis.waitUntilDone();
-    //chassis.cancelAllMotions();                  // make sure no async motion is fighting it
-    //chassis.tank(-60, -60, true);                  // push forward; true = skip the drive curve
-    clamp_wrist.move_absolute(1150, 100);
-    //pros::delay(500);
-    clamp_rollers.move(-50); //Score the first pin
+}
 
-    pros::delay(500);
-    //chassis.tank(0, 0, true);  
-    //pros::delay(500);
-    clamp_rollers.move(0); //stop the clamp rollers
+// At the drop point: keeps driving backwards at -60 (power, no drive curve) for 0.2 s, then runs the rollers
+// in reverse (-50) for another 0.2 s while still driving. Then stops the drive and the rollers.
+void dropPin() {
+    chassis.tank(-60, -60, true);
+    pros::delay(200);
+    clamp_wrist.move_absolute(1100, 100);
+    clamp_rollers.move(-50);
+    pros::delay(200);
+    chassis.tank(0, 0, true);
+    clamp_rollers.move(0);
+}
 
-   //Move to collect the first pin+cup
+// Drives forward to (-5, -7) facing 90 degrees, moves the wrist to 1500, then drives backwards
+// to (-22.3, -29.5) facing 38 degrees. Blocks until the robot is within 5 inches of that point
+// (earlyExitRange) or 3 s pass.
+void moveToPinAndCup1() {
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
-    chassis.moveToPose(-5, -7,90, 10000, {.maxSpeed = 90, .minSpeed = 80}); //Go back to 7,7 and aim at the cup + pin
-   
-    //pros::delay(500);
-    clamp_wrist.move_absolute(1500, 100); //Move the wrist up
-    chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
-    chassis.moveToPose(-22.3, -29.5,32, 3000, {.forwards = false, .maxSpeed = 90,.minSpeed = 0, .earlyExitRange = 5}, false); // move to Pin + cup
+    chassis.moveToPose(-5, -7, 90, 10000, {.maxSpeed = 90, .minSpeed = 80});
 
-   //Collect pin + cup
-   // pros::delay(1000);
+    clamp_wrist.move_absolute(1500, 100);
+    chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
+    chassis.moveToPose(-22.3, -29.5, 38, 3000, {.forwards = false, .maxSpeed = 90, .minSpeed = 0, .earlyExitRange = 5}, false);
+}
+
+// Collects the pin and cup. Runs the rollers forward (100) and lowers the wrist 1400 below where it is,
+// waiting until it gets there (3 s cap), then raises it 150. Both moves use absolute targets: a second
+// move_relative issued early would start from wherever the wrist had reached. Then turns to 15 degrees,
+// waits 0.5 s, and moves the wrist to 1100 to hold the pin and cup.
+void grabPinAndCup1() {
     clamp_rollers.move(100);
+    double wristDown = clamp_wrist.get_position() - 1400;
+    clamp_wrist.move_absolute(wristDown, 100);
+    waitForPosition(clamp_wrist, wristDown, 3000);
+    clamp_wrist.move_absolute(wristDown + 150, 100);
+    pros::delay(125);
+    chassis.turnToHeading(15, 1000);
     pros::delay(500);
-    clamp_wrist.move_absolute(280, 100); //Move the wrist down to collect pin + cup
-    pros::delay(500);
-    chassis.turnToHeading(15,1000);
-    
-    //collected pin + cup, now turn towards scoring
-   // pros::delay(300);
-    clamp_wrist.move_absolute(900, 95);
-    cascade.move_relative(1300, -127);
-    //clamp_rollers.move(0);
-    pros::delay(300);
-    chassis.turnToHeading(160, 1000000, {.maxSpeed = 80, .minSpeed = 25});
-    chassis.moveToPoint(-23.4, -20, 2000, {.forwards = false, .maxSpeed = 80, .minSpeed = 70, .earlyExitRange = 4});
-    chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
-    //pros::delay(300);
+    clamp_wrist.move_absolute(1100, 100);
+}
 
-    //Score Pin + Cup
-    //chassis.cancelAllMotions();                  // make sure no async motion is fighting it
-    //chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
-    //chassis.tank(-80, -60, true);   
-    cascade.move_relative(-500, 100);
-    //pros::delay(1200);
+// Turns toward the scoring spot: wrist to 1100, cascade to 900 (absolute, speed 300), then turns to 160
+// degrees and backs up to (-23.4, -20). Waits for the drive to finish before returning.
+// The 160 degree turn is capped at 2 s so a turn that never settles can't stall autonomous.
+void moveToDropPinAndCup1() {
+    clamp_wrist.move_absolute(1100, 95);
+    cascade.move_absolute(900, 300);
+    pros::delay(300);
+    chassis.turnToHeading(160, 2000, {.maxSpeed = 80, .minSpeed = 25});
+    chassis.moveToPoint(-23.4, -20, 2000, {.forwards = false, .maxSpeed = 80, .minSpeed = 70, .earlyExitRange = 4});
+    chassis.waitUntilDone();                           // dropPinAndCup1 must not start while still driving
+    chassis.setBrakeMode(pros::E_MOTOR_BRAKE_HOLD);
+}
+
+// Scores the pin and cup. Drives backwards at -70 / -60 while the cascade goes to 600 (absolute) and the
+// rollers run in reverse (-25); 0.2 s later the cascade returns to 900, and 0.5 s after that the wrist
+// moves by +300. Then stops the drive.
+void dropPinAndCup1() {
+    chassis.tank(-70, -60, true);
+    cascade.move_absolute(600, 300);
     clamp_rollers.move(-25);
     pros::delay(200);
-    cascade.move_relative(300, 100);
-    //pros::delay(500);
+    cascade.move_absolute(900, 300);
+    pros::delay(500);
     clamp_wrist.move_relative(300, 100);
-    //pros::delay(500);
     chassis.tank(0, 0, true);
+}
 
-    //chassis.moveToPose(-24.248, -34.744,135,  1000000, {.forwards = false, .maxSpeed = 80, .minSpeed = 70, .earlyExitRange = 4});
+// TODO: not written yet. Drive to the second pin and cup and pick them up.
+void getPinAndCup2() {}
+
+// TODO: not written yet. Drop the second pin and cup.
+void dropPinAndCup2() {}
+
+void autonomous() {
+    setupAutonomous();
+    runToggler();
+    moveToDropPin();
+    dropPin();
+    moveToPinAndCup1();
+    grabPinAndCup1();
+    moveToDropPinAndCup1();
+    dropPinAndCup1();
+    getPinAndCup2();
+    dropPinAndCup2();
 }
 
 // ==========================================
@@ -278,14 +388,11 @@ void autonomous() {
 // ==========================================
 
 void controlDrivetrain() {
-
     if (isArcadeMode) {
-        // ARCADE
         int leftY = master.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y);
         int rightX = master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X);
         chassis.arcade(leftY, rightX);
     } else {
-        // TANK
         int leftY = master.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y);
         int rightY = master.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_Y);
         chassis.tank(leftY, rightY);
@@ -293,68 +400,56 @@ void controlDrivetrain() {
 }
 
 void controlIntake() {
-    if (master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_R1)) {
-        intake.move(127); 
-    } else if (master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_R2)) {
-        intake.move(-127); 
-    } else if (master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_X)) {
-        intake.brake(); // Fix: Ensures the intake actually stops when released
-    }
+    if (master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_R1)) intake.move(127); 
+    else if (master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_R2)) intake.move(-127); 
+    else if (master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_X)) intake.brake(); 
 }
 
 void controlCascadeSpool() {
     double position_deg = cascade.get_position();
-    double TOP_LIMIT = -2800.0;
+    // Up is positive: Down drives into the bumper, which is zero. A negative limit could never be reached.
+    double TOP_LIMIT = 2800.0;
     if (master.get_digital(pros::E_CONTROLLER_DIGITAL_DOWN)) {
           if (bumper.get_value() == 1) {
-            cascade.brake(); 
-            cascade.tare_position_all(); // Prevents encoder drift
-          } else {
-            cascade.move(-127); 
-        }       
+            cascade.brake();
+            cascade.tare_position_all();
+          } else cascade.move(-127);
     } else if (master.get_digital(pros::E_CONTROLLER_DIGITAL_UP)) {
-        if (position_deg <= TOP_LIMIT) {
-            cascade.brake(); 
-        }else{ 
-            cascade.move(127); 
-        }
-        
-    }else{
+        if (position_deg >= TOP_LIMIT) cascade.brake();
+        else cascade.move(127);
+    } else {
         cascade.brake();
-    } 
+    }
 }
 
 void controlClampWrist() {
-    if (master.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) {
-        clamp_wrist.move(100); 
-    } else if (master.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
-        clamp_wrist.move(-100); 
-    } else  {
-        clamp_wrist.brake();
-    }
+    if (master.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) clamp_wrist.move(100); 
+    else if (master.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) clamp_wrist.move(-100); 
+    else clamp_wrist.brake();
 }
 
 void controlClampRollers() {
-    if (master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_A)) {
-        clamp_rollers.move(127); 
-    } else if (master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_B)) {
-        clamp_rollers.move(-127); 
-    } else if (master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_Y)) {
-        clamp_rollers.brake(); 
-    }
+    if (master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_A)) clamp_rollers.move(127); 
+    else if (master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_B)) clamp_rollers.move(-127); 
+    else if (master.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_Y)) clamp_rollers.brake(); 
 }
 
 void opcontrol() {
-    // Set brake modes and tare the spool
     initSubsystems();
 
     while (true) {
-        controlDrivetrain();
-        controlIntake();
-        controlCascadeSpool();
-        controlClampWrist();
-        controlClampRollers();
-
+        if (!isTuning) {
+            controlDrivetrain();
+            controlIntake();
+            controlCascadeSpool();
+            controlClampWrist();
+            controlClampRollers();
+        } else {
+            intake.brake();
+            cascade.brake();
+            clamp_wrist.brake();
+            clamp_rollers.brake();
+        }
         pros::delay(20); 
     }
 }
